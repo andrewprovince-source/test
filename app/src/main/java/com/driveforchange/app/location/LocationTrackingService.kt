@@ -8,6 +8,7 @@ import android.content.Intent
 import android.location.Location
 import android.os.Build
 import android.os.IBinder
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import com.driveforchange.app.DriveForChangeApplication
 import com.driveforchange.app.MainActivity
@@ -34,14 +35,18 @@ class LocationTrackingService : Service() {
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var lastLocation: Location? = null
+    private var lastUpdateAtElapsedRealtimeMs: Long = 0L
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
             val newLocation = result.lastLocation ?: return
+            val now = SystemClock.elapsedRealtime()
             val previous = lastLocation
+
             if (previous != null) {
-                val elapsedSeconds =
-                    (newLocation.elapsedRealtimeNanos - previous.elapsedRealtimeNanos) / 1_000_000_000.0
+                // Time our own receipt of each update rather than trusting the Location's
+                // embedded timestamp, which emulators/mocked providers don't always populate.
+                val elapsedSeconds = (now - lastUpdateAtElapsedRealtimeMs) / 1000.0
                 val meters = previous.distanceTo(newLocation)
 
                 // Discard GPS jumps that would imply an impossible driving speed (e.g. the
@@ -56,6 +61,7 @@ class LocationTrackingService : Service() {
                 }
             }
             lastLocation = newLocation
+            lastUpdateAtElapsedRealtimeMs = now
         }
     }
 
