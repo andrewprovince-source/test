@@ -40,11 +40,19 @@ class LocationTrackingService : Service() {
             val newLocation = result.lastLocation ?: return
             val previous = lastLocation
             if (previous != null) {
+                val elapsedSeconds =
+                    (newLocation.elapsedRealtimeNanos - previous.elapsedRealtimeNanos) / 1_000_000_000.0
                 val meters = previous.distanceTo(newLocation)
-                val miles = meters * METERS_TO_MILES
-                if (miles > 0.0) {
-                    val repository = (application as DriveForChangeApplication).container.donationRepository
-                    serviceScope.launch { repository.recordDistanceMiles(miles) }
+
+                // Discard GPS jumps that would imply an impossible driving speed (e.g. the
+                // emulator's default location, a cold-start fix, or a teleported test route)
+                // rather than counting them as real distance.
+                if (elapsedSeconds > 0 && meters / elapsedSeconds <= MAX_PLAUSIBLE_SPEED_MPS) {
+                    val miles = meters * METERS_TO_MILES
+                    if (miles > 0.0) {
+                        val repository = (application as DriveForChangeApplication).container.donationRepository
+                        serviceScope.launch { repository.recordDistanceMiles(miles) }
+                    }
                 }
             }
             lastLocation = newLocation
@@ -117,6 +125,9 @@ class LocationTrackingService : Service() {
         private const val UPDATE_INTERVAL_MS = 10_000L
         private const val MIN_UPDATE_DISTANCE_METERS = 10f
         private const val METERS_TO_MILES = 0.000621371
+
+        /** ~120 mph — generous upper bound for real driving; anything faster is a GPS glitch. */
+        private const val MAX_PLAUSIBLE_SPEED_MPS = 54.0
 
         fun start(context: Context) {
             val intent = Intent(context, LocationTrackingService::class.java)
