@@ -6,4 +6,5 @@ object Routes {
     const val PREFERENCES_SETUP = "preferences_setup"
     const val DASHBOARD = "dashboard"
     const val SETTINGS = "settings"
+    const val STATS = "stats"
 }

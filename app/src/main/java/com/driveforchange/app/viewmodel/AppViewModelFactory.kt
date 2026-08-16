@@ -17,6 +17,8 @@ class AppViewModelFactory(private val container: AppContainer) : ViewModelProvid
                 PreferencesViewModel(container.userPreferencesRepository) as T
             modelClass.isAssignableFrom(DashboardViewModel::class.java) ->
                 DashboardViewModel(container.userPreferencesRepository, container.donationRepository) as T
+            modelClass.isAssignableFrom(StatsViewModel::class.java) ->
+                StatsViewModel(container.donationRepository) as T
             else -> throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")
         }
     }

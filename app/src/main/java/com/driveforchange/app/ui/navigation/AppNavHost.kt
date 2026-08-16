@@ -15,11 +15,13 @@ import com.driveforchange.app.ui.dashboard.DashboardScreen
 import com.driveforchange.app.ui.onboarding.OnboardingScreen
 import com.driveforchange.app.ui.preferences.PreferencesSetupScreen
 import com.driveforchange.app.ui.settings.SettingsScreen
+import com.driveforchange.app.ui.stats.StatsScreen
 import com.driveforchange.app.viewmodel.AppViewModelFactory
 import com.driveforchange.app.viewmodel.DashboardViewModel
 import com.driveforchange.app.viewmodel.OnboardingViewModel
 import com.driveforchange.app.viewmodel.PreferencesViewModel
 import com.driveforchange.app.viewmodel.SignUpViewModel
+import com.driveforchange.app.viewmodel.StatsViewModel
 
 @Composable
 fun AppNavHost(container: AppContainer) {
@@ -79,7 +81,8 @@ fun AppNavHost(container: AppContainer) {
             val vm: DashboardViewModel = viewModel(factory = factory)
             DashboardScreen(
                 viewModel = vm,
-                onOpenSettings = { navController.navigate(Routes.SETTINGS) }
+                onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                onOpenStats = { navController.navigate(Routes.STATS) }
             )
         }
 
@@ -89,6 +92,14 @@ fun AppNavHost(container: AppContainer) {
                 viewModel = vm,
                 onBack = { navController.popBackStack() },
                 onSaved = { navController.popBackStack() }
+            )
+        }
+
+        composable(Routes.STATS) {
+            val vm: StatsViewModel = viewModel(factory = factory)
+            StatsScreen(
+                viewModel = vm,
+                onBack = { navController.popBackStack() }
             )
         }
     }

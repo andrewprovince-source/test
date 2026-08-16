@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -52,6 +53,7 @@ private fun formatMiles(value: Double): String = String.format(Locale.US, "%.1f 
 fun DashboardScreen(
     viewModel: DashboardViewModel,
     onOpenSettings: () -> Unit,
+    onOpenStats: () -> Unit,
 ) {
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
@@ -91,6 +93,9 @@ fun DashboardScreen(
             TopAppBar(
                 title = { Text("Drive for Change") },
                 actions = {
+                    IconButton(onClick = onOpenStats) {
+                        Icon(Icons.Filled.BarChart, contentDescription = "Your stats")
+                    }
                     IconButton(onClick = onOpenSettings) {
                         Icon(Icons.Filled.Settings, contentDescription = "Settings")
                     }

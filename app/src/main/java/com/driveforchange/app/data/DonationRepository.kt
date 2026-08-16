@@ -37,6 +37,9 @@ class DonationRepository(
         dao.upsert(DailyDonationEntity(date = today, miles = newMiles, donation = newDonation))
     }
 
+    /** Raw per-day ledger rows, newest first — the source for the stats screen's aggregations. */
+    fun dailyRecordsFlow(): Flow<List<DailyDonationEntity>> = dao.observeAll()
+
     fun totalsFlow(): Flow<DonationTotals> {
         val today = LocalDate.now()
         val todayKey = today.format(DATE_FORMAT)
