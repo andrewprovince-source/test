@@ -14,7 +14,7 @@ class AppViewModelFactory(private val container: AppContainer) : ViewModelProvid
             modelClass.isAssignableFrom(SignUpViewModel::class.java) ->
                 SignUpViewModel(container.userPreferencesRepository) as T
             modelClass.isAssignableFrom(PreferencesViewModel::class.java) ->
-                PreferencesViewModel(container.userPreferencesRepository) as T
+                PreferencesViewModel(container.userPreferencesRepository, container.donationRepository) as T
             modelClass.isAssignableFrom(DashboardViewModel::class.java) ->
                 DashboardViewModel(container.userPreferencesRepository, container.donationRepository) as T
             modelClass.isAssignableFrom(StatsViewModel::class.java) ->

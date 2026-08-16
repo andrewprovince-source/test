@@ -37,6 +37,21 @@ class DonationRepository(
         dao.upsert(DailyDonationEntity(date = today, miles = newMiles, donation = newDonation))
     }
 
+    /**
+     * Re-applies the current rate and cap to today's already-stored miles. Without this, a
+     * lowered cap only takes effect on the next GPS update — today's total could keep showing
+     * an amount from before the cap was lowered until the user drives again.
+     */
+    suspend fun reclampToday() {
+        val prefs = userPreferencesRepository.userPreferencesFlow.first()
+        val today = LocalDate.now().format(DATE_FORMAT)
+        val existing = dao.getByDate(today) ?: return
+        val clampedDonation = min(existing.miles * prefs.perMileRate, prefs.dailyCap)
+        if (clampedDonation != existing.donation) {
+            dao.upsert(existing.copy(donation = clampedDonation))
+        }
+    }
+
     /** Raw per-day ledger rows, newest first — the source for the stats screen's aggregations. */
     fun dailyRecordsFlow(): Flow<List<DailyDonationEntity>> = dao.observeAll()
 

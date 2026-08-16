@@ -60,9 +60,12 @@ Minimum SDK 26, target/compile SDK 34. Kotlin 1.9.24, Compose BOM 2024.06.00, AG
   server.
 - Tracking does not resume automatically after a device reboot (no boot receiver) — the
   user just needs to reopen the app once.
-- Location updates use a 10-second interval / 10-meter minimum distance as a simple,
-  battery-reasonable default — not tuned for accuracy on foot vs. highway speeds.
-- If the per-mile rate or cap is changed mid-day, the change applies to that day's
-  remaining miles going forward; miles already logged that day are not retroactively
-  recalculated under the old rate (todays' entry accumulates under whatever rate is
-  current at each update).
+- Location updates use a 4-second interval / 5-meter minimum distance as a simple,
+  battery-reasonable default — not tuned for accuracy on foot vs. highway speeds. GPS
+  jumps implying a driving speed over ~120 mph are discarded rather than counted, to
+  guard against GPS glitches and cold-start/emulator location artifacts.
+- Today's donation is always recomputed from today's *total* cumulative miles at the
+  *current* rate and cap — so changing the rate or cap mid-day re-prices the whole day's
+  driving so far, not just miles from that point forward. Saving a lower cap also
+  immediately re-clamps today's already-stored total, rather than waiting for the next
+  GPS update to apply it.

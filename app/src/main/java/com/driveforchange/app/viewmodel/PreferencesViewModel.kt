@@ -6,12 +6,14 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.driveforchange.app.data.Charities
+import com.driveforchange.app.data.DonationRepository
 import com.driveforchange.app.data.UserPreferencesRepository
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 class PreferencesViewModel(
-    private val userPreferencesRepository: UserPreferencesRepository
+    private val userPreferencesRepository: UserPreferencesRepository,
+    private val donationRepository: DonationRepository,
 ) : ViewModel() {
 
     var perMileRate by mutableStateOf(0.10)
@@ -48,6 +50,7 @@ class PreferencesViewModel(
     fun save(onSaved: () -> Unit) {
         viewModelScope.launch {
             userPreferencesRepository.savePreferences(perMileRate, dailyCap, charityId)
+            donationRepository.reclampToday()
             onSaved()
         }
     }
