@@ -259,9 +259,9 @@ private fun BarChart(
                 val r = cornerRadiusPx.coerceAtMost(barWidth / 2).coerceAtMost(barHeight)
                 moveTo(left, baselineY)
                 lineTo(left, top + r)
-                quadraticTo(left, top, left + r, top)
+                quadraticBezierTo(left, top, left + r, top)
                 lineTo(right - r, top)
-                quadraticTo(right, top, right, top + r)
+                quadraticBezierTo(right, top, right, top + r)
                 lineTo(right, baselineY)
                 close()
             }
