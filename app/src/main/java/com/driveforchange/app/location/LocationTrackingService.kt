@@ -128,8 +128,8 @@ class LocationTrackingService : Service() {
     companion object {
         private const val CHANNEL_ID = "drive_tracking_channel"
         private const val NOTIFICATION_ID = 1001
-        private const val UPDATE_INTERVAL_MS = 10_000L
-        private const val MIN_UPDATE_DISTANCE_METERS = 10f
+        private const val UPDATE_INTERVAL_MS = 4_000L
+        private const val MIN_UPDATE_DISTANCE_METERS = 5f
         private const val METERS_TO_MILES = 0.000621371
 
         /** ~120 mph — generous upper bound for real driving; anything faster is a GPS glitch. */
