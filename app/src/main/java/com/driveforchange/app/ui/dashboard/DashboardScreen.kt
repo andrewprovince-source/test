@@ -61,20 +61,24 @@ fun DashboardScreen(
     var hasLocationPermission by remember {
         mutableStateOf(LocationTrackingController.hasLocationPermission(context))
     }
+    var hasActivityRecognitionPermission by remember {
+        mutableStateOf(LocationTrackingController.hasActivityRecognitionPermission(context))
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { results ->
-        hasLocationPermission = results.values.any { it }
+    ) {
+        hasLocationPermission = LocationTrackingController.hasLocationPermission(context)
+        hasActivityRecognitionPermission = LocationTrackingController.hasActivityRecognitionPermission(context)
         if (hasLocationPermission) {
             viewModel.setTrackingPaused(false)
         }
     }
 
-    // Prompt for location permission as soon as the dashboard first appears if it's still missing.
+    // Prompt for permissions as soon as the dashboard first appears if any are still missing.
     LaunchedEffect(Unit) {
-        if (!hasLocationPermission) {
-            permissionLauncher.launch(locationPermissions())
+        if (!hasLocationPermission || !hasActivityRecognitionPermission) {
+            permissionLauncher.launch(requiredPermissions())
         }
     }
 
@@ -192,6 +196,12 @@ fun DashboardScreen(
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.error,
                                 )
+                            } else if (!hasActivityRecognitionPermission) {
+                                Text(
+                                    text = "Physical activity permission needed so only driving gets counted",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
                             }
                         }
                         Switch(
@@ -201,7 +211,7 @@ fun DashboardScreen(
                                     if (hasLocationPermission) {
                                         viewModel.setTrackingPaused(false)
                                     } else {
-                                        permissionLauncher.launch(locationPermissions())
+                                        permissionLauncher.launch(requiredPermissions())
                                     }
                                 } else {
                                     viewModel.setTrackingPaused(true)
@@ -223,13 +233,16 @@ private fun BreakdownStat(label: String, value: String) {
     }
 }
 
-private fun locationPermissions(): Array<String> {
+private fun requiredPermissions(): Array<String> {
     val permissions = mutableListOf(
         Manifest.permission.ACCESS_FINE_LOCATION,
         Manifest.permission.ACCESS_COARSE_LOCATION,
     )
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         permissions.add(Manifest.permission.POST_NOTIFICATIONS)
+    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        permissions.add(Manifest.permission.ACTIVITY_RECOGNITION)
     }
     return permissions.toTypedArray()
 }

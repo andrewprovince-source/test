@@ -19,7 +19,10 @@ product details.
 - **Mileage tracking** — a foreground `Service` using `FusedLocationProviderClient`
   accumulates GPS distance while tracking is active, converts it to a mock donation
   (`miles * rate`, capped at the daily cap) and stores it in Room, keyed by date
-  (`location/`, `data/`)
+  (`location/`, `data/`). Distance is only counted while Android's on-device Activity
+  Recognition classifier currently agrees the user is `IN_VEHICLE`, so walking, cycling,
+  or transit isn't credited as driving (`ActivityRecognitionReceiver`,
+  `DrivingActivityState`).
 - **Mock ledger** — Room database (`daily_donations` table, one row per day) is the local
   "ledger"; DataStore Preferences holds account/settings state. No network calls anywhere.
 
@@ -48,8 +51,10 @@ build-verified. To build it yourself:
    ```
 2. Run on a device/emulator with Google Play services (needed for
    `play-services-location`).
-3. Grant location (and, on Android 13+, notification) permission when prompted on the
-   dashboard — mileage tracking won't start without it.
+3. Grant location, physical activity (Android 10+), and notification (Android 13+)
+   permission when prompted on the dashboard — mileage tracking won't count anything
+   without location, and won't distinguish driving from walking/cycling without physical
+   activity permission (see below).
 
 Minimum SDK 26, target/compile SDK 34. Kotlin 1.9.24, Compose BOM 2024.06.00, AGP 8.5.2.
 
@@ -69,3 +74,8 @@ Minimum SDK 26, target/compile SDK 34. Kotlin 1.9.24, Compose BOM 2024.06.00, AG
   driving so far, not just miles from that point forward. Saving a lower cap also
   immediately re-clamps today's already-stored total, rather than waiting for the next
   GPS update to apply it.
+- The driving classifier (Activity Recognition) only updates roughly every 30 seconds and
+  needs a moment to recognize a change, so there's a short lag — typically under a
+  minute — before tracking "notices" a drive has started or ended. If physical activity
+  permission is denied, no distance is ever counted (fails closed rather than falling
+  back to tracking all movement) and the dashboard shows a hint explaining why.

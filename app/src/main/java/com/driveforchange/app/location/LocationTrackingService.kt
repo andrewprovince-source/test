@@ -13,6 +13,8 @@ import androidx.core.app.NotificationCompat
 import com.driveforchange.app.DriveForChangeApplication
 import com.driveforchange.app.MainActivity
 import com.driveforchange.app.R
+import com.google.android.gms.location.ActivityRecognition
+import com.google.android.gms.location.ActivityRecognitionClient
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
@@ -33,6 +35,7 @@ import kotlinx.coroutines.launch
 class LocationTrackingService : Service() {
 
     private lateinit var fusedLocationClient: FusedLocationProviderClient
+    private lateinit var activityRecognitionClient: ActivityRecognitionClient
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var lastLocation: Location? = null
     private var lastUpdateAtElapsedRealtimeMs: Long = 0L
@@ -51,8 +54,13 @@ class LocationTrackingService : Service() {
 
                 // Discard GPS jumps that would imply an impossible driving speed (e.g. the
                 // emulator's default location, a cold-start fix, or a teleported test route)
-                // rather than counting them as real distance.
-                if (elapsedSeconds > 0 && meters / elapsedSeconds <= MAX_PLAUSIBLE_SPEED_MPS) {
+                // rather than counting them as real distance. Also require the activity
+                // classifier to currently agree we're in a vehicle, so walking/cycling/transit
+                // don't get credited as driving.
+                if (elapsedSeconds > 0 &&
+                    meters / elapsedSeconds <= MAX_PLAUSIBLE_SPEED_MPS &&
+                    DrivingActivityState.isInVehicle
+                ) {
                     val miles = meters * METERS_TO_MILES
                     if (miles > 0.0) {
                         val repository = (application as DriveForChangeApplication).container.donationRepository
@@ -68,12 +76,15 @@ class LocationTrackingService : Service() {
     override fun onCreate() {
         super.onCreate()
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+        activityRecognitionClient = ActivityRecognition.getClient(this)
         createNotificationChannel()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForeground(NOTIFICATION_ID, buildNotification())
+        DrivingActivityState.isInVehicle = false
         startLocationUpdates()
+        startActivityRecognition()
         return START_STICKY
     }
 
@@ -87,6 +98,25 @@ class LocationTrackingService : Service() {
             // Location permission was revoked after the service started; stop tracking.
             stopSelf()
         }
+    }
+
+    private fun startActivityRecognition() {
+        try {
+            activityRecognitionClient.requestActivityUpdates(ACTIVITY_UPDATE_INTERVAL_MS, activityRecognitionPendingIntent())
+        } catch (e: SecurityException) {
+            // ACTIVITY_RECOGNITION permission wasn't granted; DrivingActivityState.isInVehicle
+            // stays false, so no distance gets counted until it is.
+        }
+    }
+
+    private fun activityRecognitionPendingIntent(): android.app.PendingIntent {
+        val intent = Intent(this, ActivityRecognitionReceiver::class.java)
+        return android.app.PendingIntent.getBroadcast(
+            this,
+            0,
+            intent,
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_MUTABLE
+        )
     }
 
     private fun buildNotification() =
@@ -119,6 +149,8 @@ class LocationTrackingService : Service() {
 
     override fun onDestroy() {
         fusedLocationClient.removeLocationUpdates(locationCallback)
+        activityRecognitionClient.removeActivityUpdates(activityRecognitionPendingIntent())
+        DrivingActivityState.isInVehicle = false
         serviceScope.cancel()
         super.onDestroy()
     }
@@ -134,6 +166,8 @@ class LocationTrackingService : Service() {
 
         /** ~120 mph — generous upper bound for real driving; anything faster is a GPS glitch. */
         private const val MAX_PLAUSIBLE_SPEED_MPS = 54.0
+
+        private const val ACTIVITY_UPDATE_INTERVAL_MS = 30_000L
 
         fun start(context: Context) {
             val intent = Intent(context, LocationTrackingService::class.java)
