@@ -10,6 +10,7 @@ import com.driveforchange.app.data.DonationRepository
 import com.driveforchange.app.data.UserPreferencesRepository
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 class PreferencesViewModel(
     private val userPreferencesRepository: UserPreferencesRepository,
@@ -29,7 +30,9 @@ class PreferencesViewModel(
         viewModelScope.launch {
             val prefs = userPreferencesRepository.userPreferencesFlow.first()
             perMileRate = prefs.perMileRate
-            dailyCap = prefs.dailyCap
+            // Rounds any pre-existing fractional cap (from before the cap slider snapped to
+            // whole dollars) back onto a clean value as soon as this screen loads.
+            dailyCap = prefs.dailyCap.roundToInt().toDouble()
             charityId = prefs.charityId
             isLoaded = true
         }

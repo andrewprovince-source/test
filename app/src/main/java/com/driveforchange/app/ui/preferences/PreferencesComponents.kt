@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import com.driveforchange.app.data.Charities
 import com.driveforchange.app.data.Charity
 import java.util.Locale
+import kotlin.math.roundToInt
 
 private fun formatMoney(value: Double, decimals: Int = 2): String =
     String.format(Locale.US, "$%.${decimals}f", value)
@@ -69,8 +70,9 @@ fun DailyCapSection(cap: Double, onCapChange: (Double) -> Unit) {
         )
         Slider(
             value = cap.toFloat(),
-            onValueChange = { onCapChange(it.toDouble()) },
+            onValueChange = { onCapChange(it.roundToInt().toDouble()) },
             valueRange = 1f..20f,
+            steps = 18, // whole-dollar stops between $1 and $20, matching the rounded-dollar label above
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf(5.0, 10.0, 15.0).forEach { preset ->
