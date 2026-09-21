@@ -1,7 +1,10 @@
 package com.driveforchange.app.ui.dashboard
 
 import android.Manifest
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -12,7 +15,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Settings
@@ -28,8 +33,10 @@ import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.SuggestionChipDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -39,8 +46,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.driveforchange.app.location.LocationTrackingController
 import com.driveforchange.app.viewmodel.DashboardViewModel
 import java.util.Locale
@@ -64,14 +74,55 @@ fun DashboardScreen(
     var hasActivityRecognitionPermission by remember {
         mutableStateOf(LocationTrackingController.hasActivityRecognitionPermission(context))
     }
+    var hasBackgroundLocationPermission by remember {
+        mutableStateOf(LocationTrackingController.hasBackgroundLocationPermission(context))
+    }
+
+    fun refreshPermissions() {
+        hasLocationPermission = LocationTrackingController.hasLocationPermission(context)
+        hasActivityRecognitionPermission = LocationTrackingController.hasActivityRecognitionPermission(context)
+        hasBackgroundLocationPermission = LocationTrackingController.hasBackgroundLocationPermission(context)
+    }
+
+    // "Allow all the time" is granted in system settings on Android 11+, so the only way to
+    // notice it was granted is to re-check when the user comes back to the app.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) refreshPermissions()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) {
-        hasLocationPermission = LocationTrackingController.hasLocationPermission(context)
-        hasActivityRecognitionPermission = LocationTrackingController.hasActivityRecognitionPermission(context)
+        refreshPermissions()
         if (hasLocationPermission) {
             viewModel.setTrackingPaused(false)
+        }
+    }
+
+    // Android requires background location to be asked for separately, and only after
+    // foreground location has already been granted.
+    val backgroundPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { refreshPermissions() }
+
+    fun requestBackgroundLocation() {
+        when {
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.Q -> Unit
+            // Android 11+ refuses to show a dialog for this one; it has to be granted in
+            // the app's own settings page.
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> {
+                val intent = Intent(
+                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.fromParts("package", context.packageName, null),
+                )
+                context.startActivity(intent)
+            }
+            else -> backgroundPermissionLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
         }
     }
 
@@ -82,14 +133,11 @@ fun DashboardScreen(
         }
     }
 
-    // Keep the tracking service in sync with the paused flag and permission state.
-    LaunchedEffect(state.trackingPaused, hasLocationPermission, state.loaded) {
+    // Arm drive detection once the permissions it needs are in place, and tear it down when
+    // the user pauses. Re-arming is harmless, so this can run on any of these changing.
+    LaunchedEffect(state.trackingPaused, state.loaded, hasLocationPermission, hasActivityRecognitionPermission) {
         if (!state.loaded) return@LaunchedEffect
-        if (!state.trackingPaused && hasLocationPermission) {
-            LocationTrackingController.start(context)
-        } else {
-            LocationTrackingController.stop(context)
-        }
+        LocationTrackingController.applyTrackingState(context, trackingPaused = state.trackingPaused)
     }
 
     Scaffold(
@@ -111,6 +159,7 @@ fun DashboardScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
                     .padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Top,
@@ -179,14 +228,18 @@ fun DashboardScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = if (state.trackingPaused) "Tracking paused" else "Tracking active",
+                                text = if (state.trackingPaused) "Tracking paused" else "Tracking automatically",
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.SemiBold,
                             )
                             Text(
-                                text = if (state.trackingPaused) "Resume to keep counting your miles" else "Pause anytime, like on a long trip",
+                                text = if (state.trackingPaused) {
+                                    "Resume to keep counting your miles"
+                                } else {
+                                    "Your drives are counted on their own — no need to open the app"
+                                },
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                             )
@@ -220,7 +273,41 @@ fun DashboardScreen(
                         )
                     }
                 }
+
+                // Foreground location alone only counts drives taken with the app open,
+                // which is the thing background tracking is meant to fix.
+                if (hasLocationPermission && !hasBackgroundLocationPermission) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    BackgroundLocationPrompt(onGrant = { requestBackgroundLocation() })
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
             }
+        }
+    }
+}
+
+@Composable
+private fun BackgroundLocationPrompt(onGrant: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f)),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "Finish setting up background tracking",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Right now your miles only count while the app is open. Set location " +
+                    "access to \"Allow all the time\" and your drives get counted on their own.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
+            )
+            TextButton(onClick = onGrant) { Text("Allow all the time") }
         }
     }
 }

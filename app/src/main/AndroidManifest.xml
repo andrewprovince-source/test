@@ -3,10 +3,15 @@
 
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- "Allow all the time": lets a drive detected while the app is closed actually
+         receive locations. Must be requested on its own, after foreground location. -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+    <!-- Drive detection has to be re-subscribed after a reboot. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
         android:name=".DriveForChangeApplication"
@@ -33,9 +38,24 @@
             android:foregroundServiceType="location"
             android:exported="false" />
 
+        <!-- Both activity receivers are triggered by a PendingIntent handed to Play
+             services, so they do not need to be exported. -->
+        <receiver
+            android:name=".location.DriveTransitionReceiver"
+            android:exported="false" />
+
         <receiver
             android:name=".location.ActivityRecognitionReceiver"
             android:exported="false" />
+
+        <receiver
+            android:name=".location.BootCompletedReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
     </application>
 

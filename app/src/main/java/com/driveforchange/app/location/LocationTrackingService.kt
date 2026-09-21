@@ -2,6 +2,7 @@ package com.driveforchange.app.location
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -9,12 +10,11 @@ import android.location.Location
 import android.os.Build
 import android.os.IBinder
 import android.os.SystemClock
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.driveforchange.app.DriveForChangeApplication
 import com.driveforchange.app.MainActivity
 import com.driveforchange.app.R
-import com.google.android.gms.location.ActivityRecognition
-import com.google.android.gms.location.ActivityRecognitionClient
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
@@ -23,22 +23,33 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
- * Foreground service that tracks GPS location while active and converts distance traveled
- * into today's mock donation ledger via [DonationRepository]. Runs only while the user has
- * not paused tracking (see Home dashboard).
+ * Foreground service that runs GPS for the duration of a single drive and converts the
+ * distance traveled into today's mock donation ledger.
+ *
+ * It is started by [DriveTransitionReceiver] when Android detects the user has entered a
+ * vehicle and stopped when they leave it, so it does not run all day — see
+ * [LocationTrackingController] for how that is arranged. It re-checks the user's pause
+ * setting on every start, so a drive detected after tracking was paused is ignored even
+ * though the subscription may not have been torn down yet.
  */
 class LocationTrackingService : Service() {
 
     private lateinit var fusedLocationClient: FusedLocationProviderClient
-    private lateinit var activityRecognitionClient: ActivityRecognitionClient
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var lastLocation: Location? = null
     private var lastUpdateAtElapsedRealtimeMs: Long = 0L
+    private var lastMovementAtElapsedRealtimeMs: Long = 0L
+    private var isTracking = false
+    private var watchdogJob: Job? = null
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
@@ -63,6 +74,7 @@ class LocationTrackingService : Service() {
                 ) {
                     val miles = meters * METERS_TO_MILES
                     if (miles > 0.0) {
+                        lastMovementAtElapsedRealtimeMs = now
                         val repository = (application as DriveForChangeApplication).container.donationRepository
                         serviceScope.launch { repository.recordDistanceMiles(miles) }
                     }
@@ -76,16 +88,74 @@ class LocationTrackingService : Service() {
     override fun onCreate() {
         super.onCreate()
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
-        activityRecognitionClient = ActivityRecognition.getClient(this)
         createNotificationChannel()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(NOTIFICATION_ID, buildNotification())
-        DrivingActivityState.isInVehicle = false
-        startLocationUpdates()
-        startActivityRecognition()
+        // Android 14 requires the notification to go up promptly on every start command,
+        // including a restart after the process was killed mid-drive.
+        try {
+            startForeground(NOTIFICATION_ID, buildNotification())
+        } catch (e: Exception) {
+            // Location permission was revoked, or the start wasn't allowed after all.
+            Log.w(TAG, "Could not enter the foreground", e)
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
+        // A null intent means Android restarted us after killing the process. The service
+        // only ever runs during a drive, so assume that drive is still in progress rather
+        // than dropping the rest of it; the idle watchdog stops us if it has actually ended.
+        if (intent == null) {
+            DrivingActivityState.markDrivingStarted()
+        }
+
+        // The backstop receiver re-starts us roughly once a minute for the length of a
+        // drive. Re-requesting updates each time would reset the last known location and
+        // lose the distance covered in between, so later starts are a no-op.
+        if (!isTracking) {
+            isTracking = true
+            lastMovementAtElapsedRealtimeMs = SystemClock.elapsedRealtime()
+            stopIfTrackingPaused()
+            startLocationUpdates()
+            startIdleWatchdog()
+        }
         return START_STICKY
+    }
+
+    /**
+     * A drive can be detected after the user has paused tracking — the transition
+     * subscription is torn down asynchronously, and Play services can deliver an event that
+     * was already in flight. The saved setting is the authority, so re-check it here.
+     */
+    private fun stopIfTrackingPaused() {
+        val repository = (application as DriveForChangeApplication).container.userPreferencesRepository
+        serviceScope.launch {
+            val paused = runCatching { repository.userPreferencesFlow.first().trackingPaused }.getOrDefault(false)
+            if (paused) {
+                DrivingActivityState.markDrivingStopped()
+                stopSelf()
+            }
+        }
+    }
+
+    /**
+     * Stop the service if no distance has been recorded for a while. An `EXIT` transition
+     * normally ends a drive, but if one is missed — the classifier is not perfect — this is
+     * what keeps GPS from running for the rest of the day.
+     */
+    private fun startIdleWatchdog() {
+        watchdogJob = serviceScope.launch {
+            while (isActive) {
+                delay(WATCHDOG_CHECK_INTERVAL_MS)
+                val idleMs = SystemClock.elapsedRealtime() - lastMovementAtElapsedRealtimeMs
+                if (idleMs >= IDLE_TIMEOUT_MS) {
+                    DrivingActivityState.markDrivingStopped()
+                    stopSelf()
+                    return@launch
+                }
+            }
+        }
     }
 
     private fun startLocationUpdates() {
@@ -100,23 +170,12 @@ class LocationTrackingService : Service() {
         }
     }
 
-    private fun startActivityRecognition() {
-        try {
-            activityRecognitionClient.requestActivityUpdates(ACTIVITY_UPDATE_INTERVAL_MS, activityRecognitionPendingIntent())
-        } catch (e: SecurityException) {
-            // ACTIVITY_RECOGNITION permission wasn't granted; DrivingActivityState.isInVehicle
-            // stays false, so no distance gets counted until it is.
-        }
-    }
-
-    private fun activityRecognitionPendingIntent(): android.app.PendingIntent {
-        val intent = Intent(this, ActivityRecognitionReceiver::class.java)
-        return android.app.PendingIntent.getBroadcast(
-            this,
-            0,
-            intent,
-            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_MUTABLE
-        )
+    /**
+     * Keep tracking when the app is swiped out of recents. The drive is still happening,
+     * and the ongoing notification stays up, so there is nothing to tear down here.
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // Intentionally does not call stopSelf().
     }
 
     private fun buildNotification() =
@@ -125,11 +184,11 @@ class LocationTrackingService : Service() {
             .setContentText(getString(R.string.tracking_notification_text))
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setContentIntent(
-                android.app.PendingIntent.getActivity(
+                PendingIntent.getActivity(
                     this,
                     0,
                     Intent(this, MainActivity::class.java),
-                    android.app.PendingIntent.FLAG_IMMUTABLE
+                    PendingIntent.FLAG_IMMUTABLE
                 )
             )
             .setOngoing(true)
@@ -148,9 +207,9 @@ class LocationTrackingService : Service() {
     }
 
     override fun onDestroy() {
+        watchdogJob?.cancel()
         fusedLocationClient.removeLocationUpdates(locationCallback)
-        activityRecognitionClient.removeActivityUpdates(activityRecognitionPendingIntent())
-        DrivingActivityState.isInVehicle = false
+        isTracking = false
         serviceScope.cancel()
         super.onDestroy()
     }
@@ -158,6 +217,7 @@ class LocationTrackingService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
+        private const val TAG = "LocationTrackingService"
         private const val CHANNEL_ID = "drive_tracking_channel"
         private const val NOTIFICATION_ID = 1001
         private const val UPDATE_INTERVAL_MS = 4_000L
@@ -167,11 +227,19 @@ class LocationTrackingService : Service() {
         /** ~120 mph — generous upper bound for real driving; anything faster is a GPS glitch. */
         private const val MAX_PLAUSIBLE_SPEED_MPS = 54.0
 
-        private const val ACTIVITY_UPDATE_INTERVAL_MS = 30_000L
+        /** Long enough to sit out heavy traffic or a level crossing without ending the drive. */
+        private const val IDLE_TIMEOUT_MS = 10 * 60 * 1000L
+        private const val WATCHDOG_CHECK_INTERVAL_MS = 60_000L
 
         fun start(context: Context) {
             val intent = Intent(context, LocationTrackingService::class.java)
-            context.startForegroundService(intent)
+            try {
+                context.startForegroundService(intent)
+            } catch (e: Exception) {
+                // Android 12+ can refuse a background start outside of its exemptions. The
+                // next drive transition will try again, so this is not worth surfacing.
+                Log.w(TAG, "Could not start mileage tracking", e)
+            }
         }
 
         fun stop(context: Context) {
