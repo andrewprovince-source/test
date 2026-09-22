@@ -1,19 +1,15 @@
 package com.driveforchange.app.location
 
 /**
- * Whether a drive is currently in progress, according to Android's on-device activity
- * classifier. [LocationTrackingService] only counts distance while this is true, so walking,
- * cycling, or transit don't get credited as driving.
+ * Whether the activity classifier currently confirms the user is driving.
+ * [LocationTrackingService] only credits distance while this is true, so walking, cycling,
+ * or transit don't get counted as driving.
  *
- * Two sources write to this, and they are deliberately asymmetric:
+ * Set by an `ENTER` vehicle transition or a confident periodic `IN_VEHICLE` reading. Cleared
+ * by an `EXIT` transition, a confident on-foot reading, or the service stopping — never by a
+ * `STILL` reading, since that's what the classifier reports at red lights.
  *
- * - [DriveTransitionReceiver] (primary) sets it on an `ENTER`/`EXIT` vehicle transition.
- * - [ActivityRecognitionReceiver] (backstop) may only *promote* it to true when it sees a
- *   confident `IN_VEHICLE` reading, never demote it. Periodic classifications report `STILL`
- *   at red lights and in traffic, so letting them demote would silently drop mileage
- *   mid-drive. A drive ends on an `EXIT` transition, or on the service's idle watchdog.
- *
- * Defaults to false: distance is only counted once driving has actively been confirmed.
+ * Defaults to false: distance is only credited once driving has actively been confirmed.
  */
 object DrivingActivityState {
 
@@ -21,12 +17,10 @@ object DrivingActivityState {
     var isInVehicle: Boolean = false
         private set
 
-    /** An `ENTER_IN_VEHICLE` transition, or a confident periodic `IN_VEHICLE` classification. */
     fun markDrivingStarted() {
         isInVehicle = true
     }
 
-    /** An `EXIT_IN_VEHICLE` transition, the idle watchdog, or tracking being torn down. */
     fun markDrivingStopped() {
         isInVehicle = false
     }

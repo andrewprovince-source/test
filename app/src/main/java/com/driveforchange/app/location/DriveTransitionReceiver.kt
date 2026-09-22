@@ -8,13 +8,9 @@ import com.google.android.gms.location.ActivityTransitionResult
 import com.google.android.gms.location.DetectedActivity
 
 /**
- * Wakes the app when a drive starts or ends.
- *
- * This is the primary driver of background tracking: Play services delivers these
- * transitions even when the app has been closed or swiped away, which is what lets mileage
- * be tracked all day without opening the app. Starting a foreground service from here is
- * allowed on Android 12+, which exempts activity recognition transition events from its
- * background foreground-service start restrictions.
+ * Wakes the app when Android's activity classifier says a drive started or ended. Play
+ * services delivers these even when the app is closed, and Android 12+ allows a location
+ * foreground service to be started in response to them.
  */
 class DriveTransitionReceiver : BroadcastReceiver() {
 
@@ -29,12 +25,13 @@ class DriveTransitionReceiver : BroadcastReceiver() {
 
         when (latestVehicleEvent.transitionType) {
             ActivityTransition.ACTIVITY_TRANSITION_ENTER -> {
-                DrivingActivityState.markDrivingStarted()
-                LocationTrackingController.startTrackingDrive(context)
+                TrackingLog.log(context, "Classifier: entered a vehicle")
+                LocationTrackingController.startTrackingDrive(context, reason = "entered vehicle", inVehicle = true)
             }
             ActivityTransition.ACTIVITY_TRANSITION_EXIT -> {
+                TrackingLog.log(context, "Classifier: left the vehicle")
                 DrivingActivityState.markDrivingStopped()
-                LocationTrackingService.stop(context.applicationContext)
+                LocationTrackingService.stop(context, reason = "left vehicle")
             }
         }
     }

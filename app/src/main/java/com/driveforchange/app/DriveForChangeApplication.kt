@@ -34,7 +34,11 @@ class DriveForChangeApplication : Application() {
                 .map { it.trackingPaused }
                 .distinctUntilChanged()
                 .collect { paused ->
-                    LocationTrackingController.applyTrackingState(this@DriveForChangeApplication, paused)
+                    LocationTrackingController.applyTrackingState(
+                        this@DriveForChangeApplication,
+                        trackingPaused = paused,
+                        reason = "app process started",
+                    )
                 }
         }
     }

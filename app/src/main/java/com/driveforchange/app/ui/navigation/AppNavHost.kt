@@ -12,6 +12,7 @@ import androidx.navigation.compose.rememberNavController
 import com.driveforchange.app.data.AppContainer
 import com.driveforchange.app.ui.auth.SignUpScreen
 import com.driveforchange.app.ui.dashboard.DashboardScreen
+import com.driveforchange.app.ui.log.TrackingLogScreen
 import com.driveforchange.app.ui.onboarding.OnboardingScreen
 import com.driveforchange.app.ui.preferences.PreferencesSetupScreen
 import com.driveforchange.app.ui.settings.SettingsScreen
@@ -82,7 +83,8 @@ fun AppNavHost(container: AppContainer) {
             DashboardScreen(
                 viewModel = vm,
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
-                onOpenStats = { navController.navigate(Routes.STATS) }
+                onOpenStats = { navController.navigate(Routes.STATS) },
+                onOpenTrackingLog = { navController.navigate(Routes.TRACKING_LOG) },
             )
         }
 
@@ -93,6 +95,10 @@ fun AppNavHost(container: AppContainer) {
                 onBack = { navController.popBackStack() },
                 onSaved = { navController.popBackStack() }
             )
+        }
+
+        composable(Routes.TRACKING_LOG) {
+            TrackingLogScreen(onBack = { navController.popBackStack() })
         }
 
         composable(Routes.STATS) {

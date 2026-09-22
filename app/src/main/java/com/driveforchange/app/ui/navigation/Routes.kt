@@ -7,4 +7,5 @@ object Routes {
     const val DASHBOARD = "dashboard"
     const val SETTINGS = "settings"
     const val STATS = "stats"
+    const val TRACKING_LOG = "tracking_log"
 }

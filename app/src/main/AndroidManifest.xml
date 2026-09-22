@@ -12,6 +12,9 @@
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
     <!-- Drive detection has to be re-subscribed after a reboot. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Lets the dashboard ask to exempt the app from battery optimization, without which
+         Samsung and other OEMs put it to sleep and drop drive events. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application
         android:name=".DriveForChangeApplication"
@@ -38,8 +41,12 @@
             android:foregroundServiceType="location"
             android:exported="false" />
 
-        <!-- Both activity receivers are triggered by a PendingIntent handed to Play
+        <!-- The drive-detection receivers are triggered by PendingIntents handed to Play
              services, so they do not need to be exported. -->
+        <receiver
+            android:name=".location.ParkingGeofenceReceiver"
+            android:exported="false" />
+
         <receiver
             android:name=".location.DriveTransitionReceiver"
             android:exported="false" />

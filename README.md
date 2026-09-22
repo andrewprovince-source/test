@@ -16,19 +16,28 @@ product details.
   this-month/this-year breakdown, current charity tag, pause/resume tracking toggle
   (`ui/dashboard`)
 - **Settings** — change charity, rate, or cap at any time (`ui/settings`)
-- **Background mileage tracking** — drives are detected and counted on their own, with
-  the app closed. While tracking is armed, the app holds a low-power Activity Transition
-  subscription (`LocationTrackingController`); Play services keeps it outside our process,
-  so an `ENTER_IN_VEHICLE` transition cold-starts the app and launches
-  `LocationTrackingService` (`DriveTransitionReceiver`). That foreground service runs
-  `FusedLocationProviderClient` for the length of the drive, accumulates GPS distance,
-  converts it to a mock donation (`miles * rate`, capped at the daily cap) and stores it in
-  Room, keyed by date. An `EXIT_IN_VEHICLE` transition ends the drive and shuts GPS back
-  down, so GPS is never running outside a drive. A periodic classification receiver
-  (`ActivityRecognitionReceiver`) is kept as a backstop that can start a drive whose `ENTER`
-  transition was missed — it deliberately can't end one, since periodic classifications
-  report `STILL` at red lights. `BootCompletedReceiver` re-subscribes after a reboot or an
-  app update, both of which clear the subscription.
+- **Background mileage tracking** — drives are detected and counted with the app closed.
+  While armed, `LocationTrackingController` holds two low-power subscriptions that Play
+  services keeps outside our process, either of which can cold-start the app and launch
+  `LocationTrackingService` (both are allowed to start a location foreground service from
+  the background):
+  - an Activity Transition subscription for `IN_VEHICLE` enter/exit (`DriveTransitionReceiver`)
+  - a 200 m geofence around where the last drive ended (`ParkingGeofenceReceiver`) — the
+    dependable trigger, since the classifier's transitions are slow and sometimes never fire.
+
+  The geofence can't tell driving away from walking away, so the service can start
+  unconfirmed. Distance traveled before the classifier confirms `IN_VEHICLE` is held as
+  *pending*: credited in full once a drive is confirmed, discarded if it isn't within 5
+  minutes. Periodic classifications (`ActivityRecognitionReceiver`) confirm drives and end
+  ones whose `EXIT` transition never arrived (a confident on-foot reading; never `STILL`,
+  which is what red lights look like). GPS only runs during a possible drive; when it stops,
+  the geofence is re-planted where the drive ended. `BootCompletedReceiver` re-arms after a
+  reboot or app update. Credited miles become a mock donation (`miles * rate`, capped at the
+  daily cap) stored in Room, keyed by date.
+- **Tracking log** — every step of drive detection is written to an on-device log
+  (`TrackingLog`, no coordinates), viewable and copyable from "View tracking log" on the
+  dashboard. Background failures are otherwise invisible, so this is the first thing to
+  check when a drive isn't counted.
 - **Mock ledger** — Room database (`daily_donations` table, one row per day) is the local
   "ledger"; DataStore Preferences holds account/settings state. No network calls anywhere.
 
@@ -63,7 +72,9 @@ build-verified. To build it yourself:
    permission when prompted on the dashboard — mileage tracking won't count anything
    without location, and won't detect drives at all without physical activity permission
    (see below).
-4. Then set location access to **"Allow all the time"** (`ACCESS_BACKGROUND_LOCATION`).
+4. Then follow the dashboard's setup cards: location **"Allow all the time"**, and
+   exempting the app from battery optimization (Samsung and other OEMs otherwise put it to
+   sleep and it never hears that a drive started). Set location access to **"Allow all the time"** (`ACCESS_BACKGROUND_LOCATION`).
    Android requires this to be granted separately from the first prompt, and on Android
    11+ only from the app's system settings page, so the dashboard shows a card that links
    there. Without it, a drive detected while the app is closed starts the service but
@@ -78,10 +89,12 @@ Minimum SDK 26, target/compile SDK 34. Kotlin 1.9.24, Compose BOM 2024.06.00, AG
 - No real payment processing — donation totals are a local mock ledger only.
 - No Google Sign-In — email/password only, stored on-device, not validated against any
   server.
-- Drive detection depends on Android's activity classifier, which takes a moment to catch
-  on and occasionally misses a transition entirely. In practice the first ~30–60 seconds of
-  a drive may go uncounted, and a short trip can be missed. The periodic backstop narrows
-  this but doesn't eliminate it.
+- The parking geofence is first planted wherever the phone is when tracking arms (opening
+  the app, or a reboot), then re-planted where each drive ends. Android delivers background
+  geofence exits with a delay (often 1–3 minutes), and the miles covered before tracking
+  starts can't be recovered.
+- Walking more than 200 m from where the car is parked triggers up to 5 minutes of GPS
+  before it's ruled out as a drive (sooner if the classifier reports on-foot).
 - If an `EXIT_IN_VEHICLE` transition is missed, an idle watchdog in the service stops GPS
   after 10 minutes without recorded movement rather than letting it run for the rest of the
   day. A long traffic jam could therefore end a drive early.

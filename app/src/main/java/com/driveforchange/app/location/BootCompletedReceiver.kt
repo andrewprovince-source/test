@@ -32,9 +32,10 @@ class BootCompletedReceiver : BroadcastReceiver() {
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
                 val paused = repository.userPreferencesFlow.first().trackingPaused
-                LocationTrackingController.applyTrackingState(appContext, trackingPaused = paused)
+                LocationTrackingController.applyTrackingState(appContext, trackingPaused = paused, reason = "${intent.action?.substringAfterLast('.')}")
             } catch (e: Exception) {
                 Log.w(TAG, "Could not re-arm tracking after ${intent.action}", e)
+                TrackingLog.log(appContext, "Could not re-arm after ${intent.action}: ${e.message}")
             } finally {
                 pendingResult.finish()
             }

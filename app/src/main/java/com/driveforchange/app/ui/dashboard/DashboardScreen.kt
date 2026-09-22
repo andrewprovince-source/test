@@ -1,6 +1,7 @@
 package com.driveforchange.app.ui.dashboard
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -64,6 +65,7 @@ fun DashboardScreen(
     viewModel: DashboardViewModel,
     onOpenSettings: () -> Unit,
     onOpenStats: () -> Unit,
+    onOpenTrackingLog: () -> Unit,
 ) {
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
@@ -77,15 +79,19 @@ fun DashboardScreen(
     var hasBackgroundLocationPermission by remember {
         mutableStateOf(LocationTrackingController.hasBackgroundLocationPermission(context))
     }
+    var isBatteryUnrestricted by remember {
+        mutableStateOf(LocationTrackingController.isBatteryUnrestricted(context))
+    }
 
     fun refreshPermissions() {
         hasLocationPermission = LocationTrackingController.hasLocationPermission(context)
         hasActivityRecognitionPermission = LocationTrackingController.hasActivityRecognitionPermission(context)
         hasBackgroundLocationPermission = LocationTrackingController.hasBackgroundLocationPermission(context)
+        isBatteryUnrestricted = LocationTrackingController.isBatteryUnrestricted(context)
     }
 
-    // "Allow all the time" is granted in system settings on Android 11+, so the only way to
-    // notice it was granted is to re-check when the user comes back to the app.
+    // "Allow all the time" and the battery exemption are both granted outside the app, so
+    // the only way to notice is to re-check when the user comes back.
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -126,6 +132,18 @@ fun DashboardScreen(
         }
     }
 
+    fun requestBatteryExemption() {
+        val direct = Intent(
+            Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+            Uri.fromParts("package", context.packageName, null),
+        )
+        try {
+            context.startActivity(direct)
+        } catch (e: ActivityNotFoundException) {
+            context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+        }
+    }
+
     // Prompt for permissions as soon as the dashboard first appears if any are still missing.
     LaunchedEffect(Unit) {
         if (!hasLocationPermission || !hasActivityRecognitionPermission) {
@@ -135,9 +153,15 @@ fun DashboardScreen(
 
     // Arm drive detection once the permissions it needs are in place, and tear it down when
     // the user pauses. Re-arming is harmless, so this can run on any of these changing.
-    LaunchedEffect(state.trackingPaused, state.loaded, hasLocationPermission, hasActivityRecognitionPermission) {
+    LaunchedEffect(
+        state.trackingPaused,
+        state.loaded,
+        hasLocationPermission,
+        hasActivityRecognitionPermission,
+        hasBackgroundLocationPermission,
+    ) {
         if (!state.loaded) return@LaunchedEffect
-        LocationTrackingController.applyTrackingState(context, trackingPaused = state.trackingPaused)
+        LocationTrackingController.applyTrackingState(context, trackingPaused = state.trackingPaused, reason = "dashboard")
     }
 
     Scaffold(
@@ -229,16 +253,21 @@ fun DashboardScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
+                            val backgroundReady = hasBackgroundLocationPermission && hasActivityRecognitionPermission
                             Text(
-                                text = if (state.trackingPaused) "Tracking paused" else "Tracking automatically",
+                                text = when {
+                                    state.trackingPaused -> "Tracking paused"
+                                    backgroundReady -> "Tracking automatically"
+                                    else -> "Tracking needs setup"
+                                },
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.SemiBold,
                             )
                             Text(
-                                text = if (state.trackingPaused) {
-                                    "Resume to keep counting your miles"
-                                } else {
-                                    "Your drives are counted on their own — no need to open the app"
+                                text = when {
+                                    state.trackingPaused -> "Resume to keep counting your miles"
+                                    backgroundReady -> "Your drives are counted on their own — no need to open the app"
+                                    else -> "Drives won't be counted while the app is closed yet — see below"
                                 },
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
@@ -278,17 +307,40 @@ fun DashboardScreen(
                 // which is the thing background tracking is meant to fix.
                 if (hasLocationPermission && !hasBackgroundLocationPermission) {
                     Spacer(modifier = Modifier.height(16.dp))
-                    BackgroundLocationPrompt(onGrant = { requestBackgroundLocation() })
+                    SetupPrompt(
+                        title = "Allow location all the time",
+                        body = "Without this, Android won't let the app use GPS while it's closed, so " +
+                            "drives only count with the app open. In the screen that opens, tap " +
+                            "Permissions → Location → \"Allow all the time\".",
+                        action = "Open settings",
+                        onAction = { requestBackgroundLocation() },
+                    )
                 }
 
-                Spacer(modifier = Modifier.height(24.dp))
+                // Samsung in particular puts apps to sleep unless they're exempted, and a
+                // sleeping app never hears that a drive started.
+                if (!isBatteryUnrestricted && !state.trackingPaused) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    SetupPrompt(
+                        title = "Let the app run in the background",
+                        body = "Your phone's battery saver can put the app to sleep and stop it from " +
+                            "noticing when a drive starts. Tap Allow on the next screen.",
+                        action = "Allow",
+                        onAction = { requestBatteryExemption() },
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                TextButton(onClick = onOpenTrackingLog) { Text("View tracking log") }
+
+                Spacer(modifier = Modifier.height(16.dp))
             }
         }
     }
 }
 
 @Composable
-private fun BackgroundLocationPrompt(onGrant: () -> Unit) {
+private fun SetupPrompt(title: String, body: String, action: String, onAction: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -296,18 +348,17 @@ private fun BackgroundLocationPrompt(onGrant: () -> Unit) {
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = "Finish setting up background tracking",
+                text = title,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Right now your miles only count while the app is open. Set location " +
-                    "access to \"Allow all the time\" and your drives get counted on their own.",
+                text = body,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
             )
-            TextButton(onClick = onGrant) { Text("Allow all the time") }
+            TextButton(onClick = onAction) { Text(action) }
         }
     }
 }
