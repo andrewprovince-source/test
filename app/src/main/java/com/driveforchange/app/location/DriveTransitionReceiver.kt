@@ -25,7 +25,10 @@ class DriveTransitionReceiver : BroadcastReceiver() {
 
         when (latestVehicleEvent.transitionType) {
             ActivityTransition.ACTIVITY_TRANSITION_ENTER -> {
-                TrackingLog.log(context, "Classifier: entered a vehicle")
+                // Re-registering (every time the app opens) replays ENTER mid-drive; skip those.
+                if (!(LocationTrackingService.isRunning && DrivingActivityState.isInVehicle)) {
+                    TrackingLog.log(context, "Classifier: entered a vehicle")
+                }
                 LocationTrackingController.startTrackingDrive(context, reason = "entered vehicle", inVehicle = true)
             }
             ActivityTransition.ACTIVITY_TRANSITION_EXIT -> {

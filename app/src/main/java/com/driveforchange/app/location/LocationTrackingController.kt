@@ -17,6 +17,7 @@ import com.google.android.gms.location.DetectedActivity
 import com.google.android.gms.location.Geofence
 import com.google.android.gms.location.GeofencingRequest
 import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
 
 /**
  * Entry point for arming and disarming background mileage tracking.
@@ -41,6 +42,8 @@ object LocationTrackingController {
     private const val ACTIVITY_UPDATE_INTERVAL_MS = 30_000L
 
     private const val PARKING_GEOFENCE_ID = "parking_spot"
+    private const val STATE_PREFS = "tracking_state"
+    private const val KEY_GEOFENCE_PLANTED = "parking_geofence_planted"
 
     /** Wide enough that GPS drift while parked doesn't look like leaving. */
     private const val PARKING_GEOFENCE_RADIUS_METERS = 200f
@@ -123,8 +126,10 @@ object LocationTrackingController {
             TrackingLog.log(appContext, "Activity registration refused: ${e.message}")
         }
 
-        // Mid-drive, the service plants the geofence itself when the drive ends.
-        if (!LocationTrackingService.isRunning) {
+        // Only the end of a drive knows where the car is, and the service plants the geofence
+        // there. Re-planting here on every app start would drag it to wherever the phone
+        // happens to be, often on a coarse fix — so only plant when there's none at all.
+        if (!LocationTrackingService.isRunning && !isParkingGeofencePlanted(appContext)) {
             plantParkingGeofenceAtCurrentLocation(appContext)
         }
     }
@@ -141,6 +146,7 @@ object LocationTrackingController {
             TrackingLog.log(appContext, "Could not remove activity updates: ${e.message}")
         }
         LocationServices.getGeofencingClient(appContext).removeGeofences(listOf(PARKING_GEOFENCE_ID))
+        forgetParkingGeofence(appContext)
         DrivingActivityState.markDrivingStopped()
         LocationTrackingService.stop(appContext, reason = "tracking paused", replantGeofence = false)
     }
@@ -197,6 +203,7 @@ object LocationTrackingController {
             LocationServices.getGeofencingClient(appContext)
                 .addGeofences(request, geofencePendingIntent(appContext))
                 .addOnSuccessListener {
+                    statePrefs(appContext).edit().putBoolean(KEY_GEOFENCE_PLANTED, true).apply()
                     TrackingLog.log(appContext, "Parking geofence set (${location.accuracy.toInt()} m GPS accuracy)")
                 }
                 .addOnFailureListener {
@@ -214,17 +221,33 @@ object LocationTrackingController {
             return
         }
         try {
-            LocationServices.getFusedLocationProviderClient(context).lastLocation
+            // A fresh fix rather than the cached last location, which is often coarse.
+            LocationServices.getFusedLocationProviderClient(context)
+                .getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
                 .addOnSuccessListener { location ->
                     if (location != null) {
                         plantParkingGeofence(context, location)
                     } else {
-                        TrackingLog.log(context, "Parking geofence skipped — no recent location fix")
+                        TrackingLog.log(context, "Parking geofence skipped — couldn't get a location fix")
                     }
                 }
         } catch (e: SecurityException) {
             TrackingLog.log(context, "Could not read location for geofence: ${e.message}")
         }
+    }
+
+    private fun statePrefs(context: Context) =
+        context.applicationContext.getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE)
+
+    private fun isParkingGeofencePlanted(context: Context): Boolean =
+        statePrefs(context).getBoolean(KEY_GEOFENCE_PLANTED, false)
+
+    /**
+     * Android silently drops geofences on reboot and when location is switched off. Call this
+     * then, so the next time tracking arms it plants a new one.
+     */
+    fun forgetParkingGeofence(context: Context) {
+        statePrefs(context).edit().putBoolean(KEY_GEOFENCE_PLANTED, false).apply()
     }
 
     private fun vehicleTransition(transition: Int): ActivityTransition =

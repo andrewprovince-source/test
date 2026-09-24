@@ -89,8 +89,9 @@ Minimum SDK 26, target/compile SDK 34. Kotlin 1.9.24, Compose BOM 2024.06.00, AG
 - No real payment processing — donation totals are a local mock ledger only.
 - No Google Sign-In — email/password only, stored on-device, not validated against any
   server.
-- The parking geofence is first planted wherever the phone is when tracking arms (opening
-  the app, or a reboot), then re-planted where each drive ends. Android delivers background
+- The parking geofence is re-planted where each drive ends. It's only planted anywhere
+  else when there's none at all (first setup, after a reboot, or after location was switched
+  off) — then it goes wherever the phone is at that moment, which may not be the car. Android delivers background
   geofence exits with a delay (often 1–3 minutes), and the miles covered before tracking
   starts can't be recovered.
 - Walking more than 200 m from where the car is parked triggers up to 5 minutes of GPS

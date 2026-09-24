@@ -19,6 +19,10 @@ class ParkingGeofenceReceiver : BroadcastReceiver() {
         val event = GeofencingEvent.fromIntent(intent) ?: return
         if (event.hasError()) {
             TrackingLog.log(context, "Geofence error: ${GeofenceStatusCodes.getStatusCodeString(event.errorCode)}")
+            // Location was switched off, which removes all geofences.
+            if (event.errorCode == GeofenceStatusCodes.GEOFENCE_NOT_AVAILABLE) {
+                LocationTrackingController.forgetParkingGeofence(context)
+            }
             return
         }
         if (event.geofenceTransition == Geofence.GEOFENCE_TRANSITION_EXIT) {

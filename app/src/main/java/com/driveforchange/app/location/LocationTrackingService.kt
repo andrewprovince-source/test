@@ -101,7 +101,7 @@ class LocationTrackingService : Service() {
         }
         if (!driveConfirmed) {
             driveConfirmed = true
-            log("Drive confirmed — crediting ${formatMiles(pendingMiles)} traveled before confirmation")
+            log(if (pendingMiles > 0.0) "Drive confirmed — crediting ${formatMiles(pendingMiles)} traveled before confirmation" else "Drive confirmed")
             updateNotification()
         }
         val toCredit = miles + pendingMiles

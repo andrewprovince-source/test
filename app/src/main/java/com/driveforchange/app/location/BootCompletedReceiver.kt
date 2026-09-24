@@ -31,6 +31,8 @@ class BootCompletedReceiver : BroadcastReceiver() {
 
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
+                // Android clears geofences on reboot; make sure arming plants a new one.
+                LocationTrackingController.forgetParkingGeofence(appContext)
                 val paused = repository.userPreferencesFlow.first().trackingPaused
                 LocationTrackingController.applyTrackingState(appContext, trackingPaused = paused, reason = "${intent.action?.substringAfterLast('.')}")
             } catch (e: Exception) {
