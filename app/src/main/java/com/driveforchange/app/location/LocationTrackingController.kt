@@ -193,10 +193,14 @@ object LocationTrackingController {
             .setRequestId(PARKING_GEOFENCE_ID)
             .setCircularRegion(location.latitude, location.longitude, PARKING_GEOFENCE_RADIUS_METERS)
             .setExpirationDuration(Geofence.NEVER_EXPIRE)
-            .setTransitionTypes(Geofence.GEOFENCE_TRANSITION_EXIT)
+            .setTransitionTypes(Geofence.GEOFENCE_TRANSITION_ENTER or Geofence.GEOFENCE_TRANSITION_EXIT)
             .build()
         val request = GeofencingRequest.Builder()
-            .setInitialTrigger(0) // only fire on actually leaving, not on being outside already
+            // Play services only reports an EXIT once it has established the phone was
+            // inside. Without an initial trigger it may never check while the phone sits
+            // still, and in practice the geofence almost never fired. Asking for an
+            // immediate ENTER forces that check; the receiver just logs it.
+            .setInitialTrigger(GeofencingRequest.INITIAL_TRIGGER_ENTER)
             .addGeofence(geofence)
             .build()
         try {

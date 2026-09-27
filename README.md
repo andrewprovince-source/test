@@ -22,8 +22,10 @@ product details.
   `LocationTrackingService` (both are allowed to start a location foreground service from
   the background):
   - an Activity Transition subscription for `IN_VEHICLE` enter/exit (`DriveTransitionReceiver`)
-  - a 200 m geofence around where the last drive ended (`ParkingGeofenceReceiver`) — the
-    dependable trigger, since the classifier's transitions are slow and sometimes never fire.
+  - a 200 m geofence around where the last drive ended (`ParkingGeofenceReceiver`) — a
+    backstop for when the classifier's transitions don't fire. It's planted with an initial
+    ENTER trigger: without one, Play services often never established the phone was inside,
+    and so never reported leaving ("Parking geofence active" in the log confirms it did).
 
   The geofence can't tell driving away from walking away, so the service can start
   unconfirmed. Distance traveled before the classifier confirms `IN_VEHICLE` is held as

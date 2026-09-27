@@ -25,6 +25,11 @@ class ParkingGeofenceReceiver : BroadcastReceiver() {
             }
             return
         }
+        if (event.geofenceTransition == Geofence.GEOFENCE_TRANSITION_ENTER) {
+            // The initial check after planting: confirms the geofence is live and armed.
+            TrackingLog.log(context, "Parking geofence active (phone is inside it)")
+            return
+        }
         if (event.geofenceTransition == Geofence.GEOFENCE_TRANSITION_EXIT) {
             TrackingLog.log(context, "Left the parking spot")
             LocationTrackingController.startTrackingDrive(context, reason = "left parking spot", inVehicle = false)
