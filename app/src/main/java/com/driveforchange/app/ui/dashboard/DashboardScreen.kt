@@ -10,32 +10,28 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BarChart
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.SuggestionChip
-import androidx.compose.material3.SuggestionChipDefaults
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -48,18 +44,33 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.driveforchange.app.location.LocationTrackingController
+import com.driveforchange.app.ui.components.IconTile
+import com.driveforchange.app.ui.components.PrimaryPillButton
+import com.driveforchange.app.ui.components.ProgressBar
+import com.driveforchange.app.ui.components.ProgressRing
+import com.driveforchange.app.ui.components.SecondaryPillButton
+import com.driveforchange.app.ui.components.SkyBackground
+import com.driveforchange.app.ui.components.SkyCard
+import com.driveforchange.app.ui.components.StatusPill
+import com.driveforchange.app.ui.components.TopPill
+import com.driveforchange.app.ui.theme.CardWhite
+import com.driveforchange.app.ui.theme.ErrorSoft
+import com.driveforchange.app.ui.theme.InkMuted
+import com.driveforchange.app.ui.theme.PillGray
+import com.driveforchange.app.ui.theme.SkyBlueSoft
 import com.driveforchange.app.viewmodel.DashboardViewModel
 import java.util.Locale
 
 private fun formatMoney(value: Double): String = String.format(Locale.US, "$%.2f", value)
 private fun formatMiles(value: Double): String = String.format(Locale.US, "%.1f mi", value)
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardScreen(
     viewModel: DashboardViewModel,
@@ -164,176 +175,138 @@ fun DashboardScreen(
         LocationTrackingController.applyTrackingState(context, trackingPaused = state.trackingPaused, reason = "dashboard")
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Drive for Change") },
-                actions = {
-                    IconButton(onClick = onOpenStats) {
-                        Icon(Icons.Filled.BarChart, contentDescription = "Your stats")
-                    }
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(Icons.Filled.Settings, contentDescription = "Settings")
-                    }
-                }
-            )
+    val backgroundReady = hasBackgroundLocationPermission && hasActivityRecognitionPermission
+    val capFraction = if (state.dailyCap > 0) (state.todayDonation / state.dailyCap).toFloat() else 0f
+
+    fun onToggleTracking() {
+        if (state.trackingPaused) {
+            if (hasLocationPermission) viewModel.setTrackingPaused(false) else permissionLauncher.launch(requiredPermissions())
+        } else {
+            viewModel.setTrackingPaused(true)
         }
-    ) { padding ->
-        Surface(modifier = Modifier.fillMaxSize().padding(padding)) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Top,
+    }
+
+    SkyBackground {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = "Today's donation",
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                )
-                Text(
-                    text = formatMoney(state.todayDonation),
-                    style = MaterialTheme.typography.displayLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                )
+                TopPill {
+                    ProgressRing(fraction = capFraction, color = MaterialTheme.colorScheme.primary)
+                    Text(
+                        text = buildAnnotatedString {
+                            append(formatMoney(state.todayDonation))
+                            withStyle(SpanStyle(color = InkMuted)) { append(" / " + formatMoney(state.dailyCap)) }
+                        },
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                }
+                Surface(shape = CircleShape, color = CardWhite, shadowElevation = 1.dp) {
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(Icons.Outlined.Settings, contentDescription = "Settings")
+                    }
+                }
+            }
 
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "${formatMiles(state.todayMiles)} driven today",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                )
-
-                Spacer(modifier = Modifier.height(32.dp))
-
-                Card(
+            SkyCard {
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f)),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Column(modifier = Modifier.padding(20.dp)) {
-                        Text("Lifetime total", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                        Text(
-                            text = formatMoney(state.lifetimeDonation),
-                            style = MaterialTheme.typography.headlineLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                        ) {
-                            BreakdownStat(label = "This month", value = formatMoney(state.monthDonation))
-                            BreakdownStat(label = "This year", value = formatMoney(state.yearDonation))
-                        }
+                    Text("Today", style = MaterialTheme.typography.titleLarge)
+                    when {
+                        state.trackingPaused -> StatusPill("Paused", PillGray, InkMuted)
+                        backgroundReady -> StatusPill("Auto-tracking on", SkyBlueSoft, MaterialTheme.colorScheme.primary, showDot = true)
+                        else -> StatusPill("Needs setup", ErrorSoft, MaterialTheme.colorScheme.error)
                     }
                 }
-
-                Spacer(modifier = Modifier.height(24.dp))
-
-                SuggestionChip(
-                    onClick = onOpenSettings,
-                    label = { Text("Supporting: ${state.charity.name}") },
-                    colors = SuggestionChipDefaults.suggestionChipColors(),
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(formatMoney(state.todayDonation), style = MaterialTheme.typography.displayLarge)
+                    Text(
+                        text = "${formatMiles(state.todayMiles)} · ${formatMoney(state.perMileRate)} per mile",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = InkMuted,
+                    )
+                }
+                ProgressBar(fraction = capFraction, color = MaterialTheme.colorScheme.primary)
+                Text(
+                    text = if (capFraction >= 1f) "Daily cap reached — nice driving." else "${formatMoney(state.dailyCap)} daily cap",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = InkMuted,
                 )
+                PrimaryPillButton(
+                    text = if (state.trackingPaused) "Resume tracking" else "Pause tracking",
+                    icon = if (state.trackingPaused) Icons.Filled.PlayArrow else Icons.Filled.Pause,
+                    onClick = { onToggleTracking() },
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    SecondaryPillButton("Stats", onClick = onOpenStats, icon = Icons.Filled.BarChart, modifier = Modifier.weight(1f))
+                    SecondaryPillButton("Drive log", onClick = onOpenTrackingLog, icon = Icons.Outlined.History, modifier = Modifier.weight(1f))
+                }
+                if (!hasLocationPermission) {
+                    Text("Location permission needed to track mileage", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+                } else if (!hasActivityRecognitionPermission) {
+                    Text("Physical activity permission needed so only driving gets counted", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+                }
+            }
 
-                Spacer(modifier = Modifier.height(32.dp))
+            // Foreground location alone only counts drives taken with the app open,
+            // which is the thing background tracking is meant to fix.
+            if (hasLocationPermission && !hasBackgroundLocationPermission) {
+                SetupPrompt(
+                    title = "Allow location all the time",
+                    body = "Without this, Android won't let the app use GPS while it's closed, so " +
+                        "drives only count with the app open. In the screen that opens, tap " +
+                        "Permissions → Location → \"Allow all the time\".",
+                    action = "Open settings",
+                    onAction = { requestBackgroundLocation() },
+                )
+            }
 
-                Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            val backgroundReady = hasBackgroundLocationPermission && hasActivityRecognitionPermission
-                            Text(
-                                text = when {
-                                    state.trackingPaused -> "Tracking paused"
-                                    backgroundReady -> "Tracking automatically"
-                                    else -> "Tracking needs setup"
-                                },
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                            Text(
-                                text = when {
-                                    state.trackingPaused -> "Resume to keep counting your miles"
-                                    backgroundReady -> "Your drives are counted on their own — no need to open the app"
-                                    else -> "Drives won't be counted while the app is closed yet — see below"
-                                },
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                            )
-                            if (!hasLocationPermission) {
-                                Text(
-                                    text = "Location permission needed to track mileage",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.error,
-                                )
-                            } else if (!hasActivityRecognitionPermission) {
-                                Text(
-                                    text = "Physical activity permission needed so only driving gets counted",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.error,
-                                )
-                            }
-                        }
-                        Switch(
-                            checked = !state.trackingPaused,
-                            onCheckedChange = { resume ->
-                                if (resume) {
-                                    if (hasLocationPermission) {
-                                        viewModel.setTrackingPaused(false)
-                                    } else {
-                                        permissionLauncher.launch(requiredPermissions())
-                                    }
-                                } else {
-                                    viewModel.setTrackingPaused(true)
-                                }
-                            }
-                        )
+            // Samsung in particular puts apps to sleep unless they're exempted, and a
+            // sleeping app never hears that a drive started.
+            if (!isBatteryUnrestricted && !state.trackingPaused) {
+                SetupPrompt(
+                    title = "Let the app run in the background",
+                    body = "Your phone's battery saver can put the app to sleep and stop it from " +
+                        "noticing when a drive starts. Tap Allow on the next screen.",
+                    action = "Allow",
+                    onAction = { requestBatteryExemption() },
+                )
+            }
+
+            Text("Your impact", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 4.dp))
+
+            SkyCard {
+                Text("Lifetime", style = MaterialTheme.typography.bodyMedium, color = InkMuted)
+                Text(formatMoney(state.lifetimeDonation), style = MaterialTheme.typography.headlineLarge)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                    BreakdownStat(label = "This month", value = formatMoney(state.monthDonation))
+                    BreakdownStat(label = "This year", value = formatMoney(state.yearDonation))
+                }
+            }
+
+            SkyCard(contentPadding = PaddingValues(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    IconTile(Icons.Outlined.FavoriteBorder, tint = MaterialTheme.colorScheme.primary, background = SkyBlueSoft)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Supporting", style = MaterialTheme.typography.bodySmall, color = InkMuted)
+                        Text(state.charity.name, style = MaterialTheme.typography.titleMedium)
+                        Text(state.charity.cause, style = MaterialTheme.typography.bodySmall, color = InkMuted)
                     }
+                    SecondaryPillButton("Change", onClick = onOpenSettings, height = 40.dp)
                 }
-
-                // Foreground location alone only counts drives taken with the app open,
-                // which is the thing background tracking is meant to fix.
-                if (hasLocationPermission && !hasBackgroundLocationPermission) {
-                    Spacer(modifier = Modifier.height(16.dp))
-                    SetupPrompt(
-                        title = "Allow location all the time",
-                        body = "Without this, Android won't let the app use GPS while it's closed, so " +
-                            "drives only count with the app open. In the screen that opens, tap " +
-                            "Permissions → Location → \"Allow all the time\".",
-                        action = "Open settings",
-                        onAction = { requestBackgroundLocation() },
-                    )
-                }
-
-                // Samsung in particular puts apps to sleep unless they're exempted, and a
-                // sleeping app never hears that a drive started.
-                if (!isBatteryUnrestricted && !state.trackingPaused) {
-                    Spacer(modifier = Modifier.height(16.dp))
-                    SetupPrompt(
-                        title = "Let the app run in the background",
-                        body = "Your phone's battery saver can put the app to sleep and stop it from " +
-                            "noticing when a drive starts. Tap Allow on the next screen.",
-                        action = "Allow",
-                        onAction = { requestBatteryExemption() },
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-                TextButton(onClick = onOpenTrackingLog) { Text("View tracking log") }
-
-                Spacer(modifier = Modifier.height(16.dp))
             }
         }
     }
@@ -341,33 +314,18 @@ fun DashboardScreen(
 
 @Composable
 private fun SetupPrompt(title: String, body: String, action: String, onAction: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f)),
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = body,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
-            )
-            TextButton(onClick = onAction) { Text(action) }
-        }
+    SkyCard(borderColor = MaterialTheme.colorScheme.error) {
+        Text(title, style = MaterialTheme.typography.titleMedium)
+        Text(body, style = MaterialTheme.typography.bodyMedium, color = InkMuted)
+        PrimaryPillButton(text = action, onClick = onAction, height = 48.dp)
     }
 }
 
 @Composable
 private fun BreakdownStat(label: String, value: String) {
     Column(horizontalAlignment = Alignment.Start) {
-        Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
-        Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+        Text(label, style = MaterialTheme.typography.bodySmall, color = InkMuted)
+        Text(value, style = MaterialTheme.typography.titleMedium)
     }
 }
 

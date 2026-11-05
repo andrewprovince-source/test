@@ -19,6 +19,8 @@ data class DashboardUiState(
     val yearDonation: Double = 0.0,
     val lifetimeDonation: Double = 0.0,
     val charity: Charity = Charities.default,
+    val perMileRate: Double = 0.10,
+    val dailyCap: Double = 10.0,
     val trackingPaused: Boolean = false,
     val loaded: Boolean = false,
 )
@@ -39,6 +41,8 @@ class DashboardViewModel(
             yearDonation = totals.yearDonation,
             lifetimeDonation = totals.lifetimeDonation,
             charity = Charities.byId(prefs.charityId),
+            perMileRate = prefs.perMileRate,
+            dailyCap = prefs.dailyCap,
             trackingPaused = prefs.trackingPaused,
             loaded = true,
         )
