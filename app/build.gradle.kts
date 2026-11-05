@@ -12,11 +12,29 @@ android {
         applicationId = "com.driveforchange.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
+        // CI passes its run number so each build installs as an update over the last.
+        versionCode = System.getenv("BUILD_NUMBER")?.toIntOrNull() ?: 1
         versionName = "0.1.0-prototype"
     }
 
+    // One stable key for every tester build (see .github/workflows/android-build.yml).
+    // When the environment doesn't provide it, Gradle's default debug key is used.
+    val keystorePath = System.getenv("SIGNING_KEYSTORE_PATH")
+    signingConfigs {
+        if (keystorePath != null) {
+            create("shared") {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("SIGNING_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("SIGNING_KEY_ALIAS")
+                keyPassword = System.getenv("SIGNING_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
+        if (keystorePath != null) {
+            getByName("debug") { signingConfig = signingConfigs.getByName("shared") }
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(
