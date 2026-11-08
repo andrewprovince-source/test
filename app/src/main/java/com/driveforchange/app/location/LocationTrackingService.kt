@@ -60,6 +60,13 @@ class LocationTrackingService : Service() {
     private var gpsFixCount = 0
     private var creditedMiles = 0.0
     private var pendingMiles = 0.0
+    // Distance covered below driving speed since the last fast stretch: crawling traffic,
+    // or walking away from the parked car. Credited once driving speed resumes; dropped if
+    // the drive ends first.
+    @Volatile private var slowMiles = 0.0
+    @Volatile private var lastFastAtElapsedRealtimeMs = 0L
+    private var lastFastLocation: Location? = null
+    private var fastSegmentsInARow = 0
     private var stopReason: String? = null
 
     private val locationCallback = object : LocationCallback() {
@@ -82,10 +89,12 @@ class LocationTrackingService : Service() {
                 // Discard GPS jumps that would imply an impossible driving speed (e.g. a
                 // cold-start fix or a teleported test route) rather than counting them.
                 if (elapsedSeconds > 0 && meters / elapsedSeconds <= MAX_PLAUSIBLE_SPEED_MPS) {
+                    val speedMps = meters / elapsedSeconds
+                    noteSpeed(speedMps, newLocation, now)
                     val miles = meters * METERS_TO_MILES
                     if (miles > 0.0) {
                         lastMovementAtElapsedRealtimeMs = now
-                        onDistanceTraveled(miles)
+                        onDistanceTraveled(miles, fast = speedMps >= DRIVING_PACE_MPS)
                     }
                 }
             }
@@ -94,7 +103,27 @@ class LocationTrackingService : Service() {
         }
     }
 
-    private fun onDistanceTraveled(miles: Double) {
+    /**
+     * The activity classifier can go quiet for days at a time (Nov 6–7 2026: every drive was
+     * started by the parking geofence and none was ever confirmed). Sustained speed that only
+     * a vehicle reaches confirms a drive on its own: a few consecutive GPS segments at
+     * highway-onramp pace, which walking, running and nearly all cycling never sustain.
+     */
+    private fun noteSpeed(speedMps: Double, location: Location, now: Long) {
+        if (speedMps >= DRIVING_PACE_MPS) {
+            lastFastAtElapsedRealtimeMs = now
+            lastFastLocation = location
+        }
+        if (DrivingActivityState.isInVehicle) return
+        fastSegmentsInARow =
+            if (speedMps >= GPS_CONFIRM_SPEED_MPS && location.accuracy <= GPS_CONFIRM_MAX_ACCURACY_M) fastSegmentsInARow + 1 else 0
+        if (fastSegmentsInARow >= GPS_CONFIRM_SEGMENTS) {
+            log("GPS speed confirms driving (${(speedMps * MPS_TO_MPH).toInt()} mph, $fastSegmentsInARow fixes in a row)")
+            DrivingActivityState.markDrivingStarted()
+        }
+    }
+
+    private fun onDistanceTraveled(miles: Double, fast: Boolean) {
         if (!DrivingActivityState.isInVehicle) {
             pendingMiles += miles
             return
@@ -103,12 +132,22 @@ class LocationTrackingService : Service() {
             driveConfirmed = true
             log(if (pendingMiles > 0.0) "Drive confirmed — crediting ${formatMiles(pendingMiles)} traveled before confirmation" else "Drive confirmed")
             updateNotification()
+            credit(pendingMiles)
+            pendingMiles = 0.0
         }
-        val toCredit = miles + pendingMiles
-        pendingMiles = 0.0
-        creditedMiles += toCredit
+        if (fast) {
+            credit(miles + slowMiles)
+            slowMiles = 0.0
+        } else {
+            slowMiles += miles
+        }
+    }
+
+    private fun credit(miles: Double) {
+        if (miles <= 0.0) return
+        creditedMiles += miles
         val repository = (application as DriveForChangeApplication).container.donationRepository
-        serviceScope.launch { repository.recordDistanceMiles(toCredit) }
+        serviceScope.launch { repository.recordDistanceMiles(miles) }
     }
 
     override fun onCreate() {
@@ -140,6 +179,7 @@ class LocationTrackingService : Service() {
             val now = SystemClock.elapsedRealtime()
             startedAtElapsedRealtimeMs = now
             lastMovementAtElapsedRealtimeMs = now
+            lastFastAtElapsedRealtimeMs = now
             val reason = intent?.getStringExtra(EXTRA_REASON) ?: "restarted by Android after the app was killed"
             // Start every session from what the triggering event itself established, never
             // from a leftover verdict: a stale "in vehicle" would credit a walk as a drive.
@@ -187,6 +227,11 @@ class LocationTrackingService : Service() {
                         "no drive confirmed within ${UNCONFIRMED_TIMEOUT_MS / 60_000} min"
                     now - lastMovementAtElapsedRealtimeMs >= IDLE_TIMEOUT_MS ->
                         "no movement for ${IDLE_TIMEOUT_MS / 60_000} min"
+                    // Moving, but only at walking pace for a while: the car is parked and the
+                    // user is walking around. Without the classifier, nothing else ends it.
+                    driveConfirmed && slowMiles >= SLOW_END_MIN_MILES &&
+                        now - lastFastAtElapsedRealtimeMs >= SLOW_TIMEOUT_MS ->
+                        "only walking pace for ${SLOW_TIMEOUT_MS / 60_000} min"
                     else -> null
                 }
                 if (reason != null) {
@@ -267,10 +312,15 @@ class LocationTrackingService : Service() {
 
         if (isTracking) {
             val reason = stopReason ?: pendingStopReason ?: "stopped"
-            val discarded = if (pendingMiles > 0.0) ", discarded ${formatMiles(pendingMiles)} unconfirmed" else ""
+            val discarded = buildString {
+                if (pendingMiles > 0.0) append(", discarded ${formatMiles(pendingMiles)} unconfirmed")
+                if (slowMiles > 0.0) append(", dropped ${formatMiles(slowMiles)} at walking pace")
+            }
             log("Tracking stopped ($reason): credited ${formatMiles(creditedMiles)}$discarded, $gpsFixCount GPS fixes")
 
-            val parkedAt = lastLocation
+            // After a drive, the last place the phone moved at driving speed is where the car
+            // is — not wherever the user walked to before the drive was ended.
+            val parkedAt = if (driveConfirmed) lastFastLocation ?: lastLocation else lastLocation
             if (shouldReplantGeofence && parkedAt != null) {
                 LocationTrackingController.plantParkingGeofence(applicationContext, parkedAt)
             }
@@ -298,6 +348,21 @@ class LocationTrackingService : Service() {
         private const val UPDATE_INTERVAL_MS = 4_000L
         private const val MIN_UPDATE_DISTANCE_METERS = 5f
         private const val METERS_TO_MILES = 0.000621371
+        private const val MPS_TO_MPH = 2.23694
+
+        /** ~20 mph. Sustained across [GPS_CONFIRM_SEGMENTS] fixes, only a vehicle does this. */
+        private const val GPS_CONFIRM_SPEED_MPS = 8.9
+        private const val GPS_CONFIRM_SEGMENTS = 3
+        private const val GPS_CONFIRM_MAX_ACCURACY_M = 50f
+
+        /** ~10 mph. Below this a segment is "walking pace" and held back until speed resumes. */
+        private const val DRIVING_PACE_MPS = 4.5
+
+        /** How long a confirmed drive can move only at walking pace before it's over. */
+        private const val SLOW_TIMEOUT_MS = 5 * 60 * 1000L
+
+        /** ...and how far: sitting still in traffic doesn't add distance, so it never ends a drive. */
+        private const val SLOW_END_MIN_MILES = 0.05
 
         /** ~120 mph — generous upper bound for real driving; anything faster is a GPS glitch. */
         private const val MAX_PLAUSIBLE_SPEED_MPS = 54.0

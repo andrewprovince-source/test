@@ -25,6 +25,16 @@ class ActivityRecognitionReceiver : BroadcastReceiver() {
         val result = ActivityRecognitionResult.extractResult(intent) ?: return
         val mostProbable = result.mostProbableActivity
 
+        // While a drive is waiting for confirmation, record what the classifier actually
+        // says (throttled), so a silent or wrong classifier shows up in the log.
+        if (LocationTrackingService.isRunning && !DrivingActivityState.isInVehicle) {
+            val now = SystemClock.elapsedRealtime()
+            if (now - lastDiagnosticAtElapsedRealtimeMs >= DIAGNOSTIC_INTERVAL_MS) {
+                lastDiagnosticAtElapsedRealtimeMs = now
+                TrackingLog.log(context, "Classifier reading: ${activityName(mostProbable.type)} ${mostProbable.confidence}%")
+            }
+        }
+
         when {
             mostProbable.type == DetectedActivity.IN_VEHICLE && mostProbable.confidence >= MIN_VEHICLE_CONFIDENCE -> {
                 if (LocationTrackingService.isRunning) {
@@ -60,6 +70,22 @@ class ActivityRecognitionReceiver : BroadcastReceiver() {
 
         @Volatile
         private var lastStartAttemptAtElapsedRealtimeMs = 0L
+
+        private const val DIAGNOSTIC_INTERVAL_MS = 60_000L
+
+        @Volatile
+        private var lastDiagnosticAtElapsedRealtimeMs = 0L
+
+        private fun activityName(type: Int): String = when (type) {
+            DetectedActivity.IN_VEHICLE -> "in vehicle"
+            DetectedActivity.ON_BICYCLE -> "on bicycle"
+            DetectedActivity.ON_FOOT -> "on foot"
+            DetectedActivity.WALKING -> "walking"
+            DetectedActivity.RUNNING -> "running"
+            DetectedActivity.STILL -> "still"
+            DetectedActivity.TILTING -> "tilting"
+            else -> "unknown"
+        }
 
         /** Higher bar: wrongly ending a drive loses miles, so demand a clear reading. */
         private const val MIN_ON_FOOT_CONFIDENCE = 75

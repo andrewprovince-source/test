@@ -121,6 +121,7 @@ object LocationTrackingController {
                 ACTIVITY_UPDATE_INTERVAL_MS,
                 classificationPendingIntent(appContext),
             )
+                .addOnSuccessListener { TrackingLog.log(appContext, "Periodic activity updates registered") }
                 .addOnFailureListener { TrackingLog.log(appContext, "Periodic activity registration FAILED: ${it.message}") }
         } catch (e: SecurityException) {
             TrackingLog.log(appContext, "Activity registration refused: ${e.message}")

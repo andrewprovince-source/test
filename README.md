@@ -30,7 +30,10 @@ product details.
   The geofence can't tell driving away from walking away, so the service can start
   unconfirmed. Distance traveled before the classifier confirms `IN_VEHICLE` is held as
   *pending*: credited in full once a drive is confirmed, discarded if it isn't within 5
-  minutes. Periodic classifications (`ActivityRecognitionReceiver`) confirm drives and end
+  minutes. Sustained GPS speed (about 20 mph for three fixes in a row) also confirms a drive,
+  because the classifier can go silent for days. Distance covered below ~10 mph after
+  confirmation is held back until driving speed resumes, and a drive that only moves at
+  walking pace for 5 minutes ends there. Periodic classifications (`ActivityRecognitionReceiver`) confirm drives and end
   ones whose `EXIT` transition never arrived (a confident on-foot reading; never `STILL`,
   which is what red lights look like). GPS only runs during a possible drive; when it stops,
   the geofence is re-planted where the drive ended. `BootCompletedReceiver` re-arms after a
